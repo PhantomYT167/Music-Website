@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Advanced Music Player — Spotify / Yandex style</title>
+<style>
+  :root{
+    --bg: #121212;
+    --panel: rgba(24,24,24,0.92);
+    --text: #ffffff;
+    --muted: #b3b3b3;
+    --accent: #1db954;
+  }
+  [data-theme="light"]{
+    --bg: #f2f2f2;
+    --panel: rgba(255,255,255,0.95);
+    --text: #111;
+    --muted: #555;
+    --accent: #0a84ff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+
+  /* blur background from cover */
+  #blur-bg{position:fixed;inset:0;background-size:cover;background-position:center;filter:blur(40px) saturate(0.8) brightness(0.45);z-index:-1;transition:background-image .4s ease}
+
+  .app{width: min(980px, 98%);display:flex;gap:20px;align-items:flex-start}
+
+  /* left: playlist */
+  .playlist-panel{width:320px;background:var(--panel);border-radius:14px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,0.4);}
+  .heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .heading h3{margin:0;font-size:16px}
+  .theme-toggle{cursor:pointer;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04)}
+
+  .playlist{display:flex;flex-direction:column;gap:8px;max-height:560px;overflow:auto;padding-right:6px}
+  .track{display:flex;gap:10px;align-items:center;padding:10px;border-radius:10px;cursor:pointer;transition:background .15s}
+  .track:hover{background:rgba(255,255,255,0.03)}
+  .track.active{background:linear-gradient(90deg, rgba(29,185,84,0.12), transparent)}
+  .thumb{width:56px;height:56px;border-radius:8px;background:#333;flex-shrink:0;background-size:cover;background-position:center}
+  .meta{flex:1}
+  .meta .t{font-weight:600}
+  .meta .a{font-size:13px;color:var(--muted)}
+
+  /* right: player */
+  .player-panel{flex:1;background:var(--panel);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 30px rgba(0,0,0,0.45)}
+
+  .now{display:flex;gap:18px;align-items:center}
+  .cover{width:180px;height:180px;border-radius:12px;background:#333;background-size:cover;background-position:center;box-shadow:0 10px 30px rgba(0,0,0,0.6)}
+  .meta-big{flex:1}
+  .meta-big .title{font-size:20px;font-weight:700}
+  .meta-big .artist{color:var(--muted);margin-top:6px}
+
+  /* full-screen / now playing overlay */
+  .fullscreen-btn{margin-left:auto;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);cursor:pointer}
+
+  .visualizer-canvas{width:100%;height:120px;border-radius:8px;background:linear-gradient(180deg, rgba(0,0,0,0.15), rgba(255,255,255,0.02));display:block}
+
+  .controls-row{display:flex;align-items:center;gap:12px}
+  .big-play{width:70px;height:70px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#000;font-weight:700;cursor:pointer;box-shadow:0 8px 30px rgba(29,185,84,0.18)}
+
+  .progress-wrap{display:flex;flex-direction:column;gap:6px}
+  .progress{height:8px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden}
+  .progress > span{display:block;height:100%;background:linear-gradient(90deg,var(--accent), #7ef3a8);width:0%}
+  .time-row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+
+  .volume{display:flex;align-items:center;gap:8px}
+  input[type=range]{appearance:none;height:6px;background:transparent;outline:none}
+  input[type=range]::-webkit-slider-runnable-track{height:6px;background:rgba(255,255,255,0.08);border-radius:6px}
+  input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);margin-top:-4px}
+
+  .bottom-row{display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:12px}
+
+  /* full-screen overlay styles */
+  .now-playing-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.95));display:none;align-items:center;justify-content:center;z-index:1000}
+  .now-playing-overlay.show{display:flex}
+  .overlay-card{width:100%;max-width:900px;padding:24px;border-radius:12px;background:transparent;color:var(--text);display:flex;gap:20px;align-items:center}
+  .overlay-cover{width:320px;height:320px;border-radius:12px;background-size:cover;background-position:center;box-shadow:0 30px 80px rgba(0,0,0,0.7)}
+  .overlay-meta{flex:1}
+  .overlay-meta .title{font-size:36px}
+  .close-full{position:absolute;top:18px;right:18px;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);cursor:pointer}
+
+  /* responsive */
+  @media (max-width:900px){.app{flex-direction:column;align-items:stretch}.playlist-panel{width:100%}.player-panel{width:100%}.cover{width:120px;height:120px}}
+</style>
+</head>
+<body data-theme="dark">
+<div id="blur-bg"></div>
+<div class="app">
+  <aside class="playlist-panel">
+    <div class="heading"><h3>Плейлист</h3><button class="theme-toggle" id="themeToggle">Toggle</button></div>
+    <div id="playlist" class="playlist"></div>
+    <div style="margin-top:10px;color:var(--muted);font-size:13px">Загрузи файлы music1.mp3..musicN.mp3 и обложки cover1.jpg..coverN.jpg</div>
+  </aside>
+
+  <main class="player-panel">
+    <div class="now">
+      <div class="cover" id="cover"></div>
+      <div class="meta-big">
+        <div class="title" id="title">Название трека</div>
+        <div class="artist" id="artist">Исполнитель</div>
+      </div>
+      <button class="fullscreen-btn" id="openFull">Открыть</button>
+    </div>
+
+    <canvas id="visualizer" class="visualizer-canvas"></canvas>
+
+    <div class="controls-row">
+      <div class="big-play" id="playBtn">▶</div>
+      <div style="flex:1">
+        <div class="progress-wrap">
+          <div class="progress" id="progressBar"><span id="progressFill"></span></div>
+          <div class="time-row"><span id="curTime">0:00</span><span id="durTime">0:00</span></div>
+        </div>
+        <div class="bottom-row">
+          <div class="volume"><span>🔊</span><input id="volume" type="range" min="0" max="1" step="0.01" value="0.7"></div>
+          <div style="display:flex;gap:10px;align-items:center"><button id="prev">⏮</button><button id="next">⏭</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:6px;color:var(--muted);font-size:13px">Свайп влево/вправо на телефоне - переключает треки.</div>
+
+  </main>
+</div>
+
+<!-- fullscreen overlay -->
+<div class="now-playing-overlay" id="overlay">
+  <button class="close-full" id="closeFull">Закрыть</button>
+  <div class="overlay-card">
+    <div class="overlay-cover" id="overlayCover"></div>
+    <div class="overlay-meta">
+      <div class="title" id="overlayTitle">Название</div>
+      <div class="artist" id="overlayArtist">Исполнитель</div>
+      <canvas id="overlayViz" style="margin-top:18px;width:100%;height:220px;border-radius:10px;background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.05));"></canvas>
+      <div style="margin-top:16px;display:flex;gap:12px;align-items:center">
+        <div class="big-play" id="overlayPlay">▶</div>
+        <div style="flex:1">
+          <div class="progress" style="height:10px"><span id="overlayFill" style="height:100%;display:block;width:0;background:linear-gradient(90deg,var(--accent),#7ef3a8)"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- audio element -->
+<audio id="audio"></audio>
+
+<script>
+// --- data: tracks (rename files in folder accordingly) ---
+const tracks = [
+  {src:'music1.mp3', title:'Feel Good Inc.', artist:'Gorillaz', cover:'cover1.jpg'},
+  {src:'Eminem - Lose Yourself From 8 Mile Soundtrack.mp3', title:'Lose Yourself', artist:'Eminem', cover:'cover2.jpg'},
+  {src:'Coolio, LV - Gangstas Paradise.mp3', title:'Gangstas Paradise', artist:'Coolio, LV', cover:'cover3.jpg'},
+  {src:'Lil Peep, XXXTENTACION - Falling Down Bonus Track.mp3', title:'Falling Down', artist:'Lil Peep, XXXTENTACION', cover:'cover4.jpg'},
+  {src:'Arctic Monkeys - I Wanna Be Yours.mp3', title:'I Wanna Be Yours', artist:'Arctic Monkeys', cover:'cover5.jpg'}
+];
+
+// --- DOM ---
+const audio = document.getElementById('audio');
+const playlistEl = document.getElementById('playlist');
+const coverEl = document.getElementById('cover');
+const titleEl = document.getElementById('title');
+const artistEl = document.getElementById('artist');
+const playBtn = document.getElementById('playBtn');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const progressFill = document.getElementById('progressFill');
+const curTime = document.getElementById('curTime');
+const durTime = document.getElementById('durTime');
+const volume = document.getElementById('volume');
+const openFull = document.getElementById('openFull');
+const overlay = document.getElementById('overlay');
+const closeFull = document.getElementById('closeFull');
+const overlayCover = document.getElementById('overlayCover');
+const overlayTitle = document.getElementById('overlayTitle');
+const overlayArtist = document.getElementById('overlayArtist');
+const overlayFill = document.getElementById('overlayFill');
+const themeToggle = document.getElementById('themeToggle');
+
+let index = 0;
+
+// build playlist UI
+function renderPlaylist(){
+  playlistEl.innerHTML = '';
+  tracks.forEach((t,i)=>{
+    const tr = document.createElement('div');
+    tr.className = 'track' + (i===index? ' active':'');
+    tr.innerHTML = `<div class="thumb" style="background-image:url('${t.cover}')"></div><div class="meta"><div class='t'>${t.title}</div><div class='a'>${t.artist}</div></div>`;
+    tr.onclick = ()=>{ index=i; loadTrack(i); play(); };
+    playlistEl.appendChild(tr);
+  });
+}
+
+function updateActiveTrack(){
+  document.querySelectorAll('.track').forEach((el, i)=> el.classList.toggle('active', i===index));
+}
+
+// load track
+function loadTrack(i){
+  const t = tracks[i];
+  audio.src = t.src;
+  titleEl.textContent = t.title; artistEl.textContent = t.artist;
+  coverEl.style.backgroundImage = `url('${t.cover}')`;
+  overlayCover.style.backgroundImage = `url('${t.cover}')`;
+  overlayTitle.textContent = t.title; overlayArtist.textContent = t.artist;
+  document.getElementById('blur-bg').style.backgroundImage = `url('${t.cover}')`;
+  updateActiveTrack();
+}
+
+function play(){ audio.play().catch(()=>{}); playBtn.textContent='⏸'; overlayPlay.textContent='⏸'; coverEl.classList.add('playing'); }
+function pause(){ audio.pause(); playBtn.textContent='▶'; overlayPlay.textContent='▶'; coverEl.classList.remove('playing'); }
+
+// toggle play
+playBtn.onclick = ()=> audio.paused? play(): pause();
+
+// prev/next
+prevBtn.onclick = ()=>{ index=(index-1+tracks.length)%tracks.length; loadTrack(index); play(); };
+nextBtn.onclick = ()=>{ index=(index+1)%tracks.length; loadTrack(index); play(); };
+
+// progress
+audio.ontimeupdate = ()=>{
+  if(audio.duration){
+    const pct = (audio.currentTime/audio.duration)*100; progressFill.style.width = pct+'%'; overlayFill.style.width = pct+'%';
+    curTime.textContent = formatTime(audio.currentTime); durTime.textContent = formatTime(audio.duration);
+  }
+};
+
+// click progress to seek
+document.getElementById('progressBar').parentElement.addEventListener('click', (e)=>{
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = e.clientX - rect.left; const pct = x/rect.width; if(audio.duration) audio.currentTime = pct*audio.duration;
+});
+
+// volume
+volume.oninput = ()=>{ audio.volume = volume.value; };
+
+// auto next
+audio.onended = ()=>{ index=(index+1)%tracks.length; loadTrack(index); play(); };
+
+// format
+function formatTime(s){ if(!s && s!==0) return '0:00'; const m=Math.floor(s/60); const sec=Math.floor(s%60).toString().padStart(2,'0'); return `${m}:${sec}` }
+
+// theme toggle
+themeToggle.onclick = ()=>{
+  const root = document.body;
+  if(root.getAttribute('data-theme')==='dark') root.setAttribute('data-theme','light'); else root.setAttribute('data-theme','dark');
+}
+
+// fullscreen overlay open/close
+openFull.onclick = ()=> overlay.classList.add('show'); closeFull.onclick = ()=> overlay.classList.remove('show');
+
+// swipe support for mobile
+let touchStartX=0;document.addEventListener('touchstart', e=>{ if(e.touches) touchStartX=e.touches[0].clientX });
+document.addEventListener('touchend', e=>{ if(e.changedTouches){ const dx = e.changedTouches[0].clientX - touchStartX; if(dx>80) { prevBtn.click(); } else if(dx<-80) { nextBtn.click(); } } });
+
+// --- REALISTIC EQUALIZER using WebAudio API ---
+const ctx = new (window.AudioContext||window.webkitAudioContext)();
+const srcNode = ctx.createMediaElementSource(audio);
+const analyser = ctx.createAnalyser(); analyser.fftSize = 2048; const bufferLength = analyser.frequencyBinCount; const dataArr = new Uint8Array(bufferLength);
+const gainNode = ctx.createGain(); gainNode.gain.value = 1;
+srcNode.connect(gainNode); gainNode.connect(analyser); analyser.connect(ctx.destination);
+
+// main visualizer canvas
+const canvas = document.getElementById('visualizer'); const cctx = canvas.getContext('2d'); function resizeCanv(){ canvas.width = canvas.clientWidth*devicePixelRatio; canvas.height = canvas.clientHeight*devicePixelRatio; cctx.scale(devicePixelRatio, devicePixelRatio); }
+window.addEventListener('resize', ()=>{ cctx.setTransform(1,0,0,1,0,0); resizeCanv(); }); resizeCanv();
+
+function draw(){ requestAnimationFrame(draw); analyser.getByteFrequencyData(dataArr); cctx.clearRect(0,0,canvas.clientWidth, canvas.clientHeight);
+  const bars = 64; const barWidth = canvas.clientWidth/bars; for(let i=0;i<bars;i++){ const val = dataArr[Math.floor(i*(bufferLength/bars))]; const h = (val/255)*canvas.clientHeight; const x = i*barWidth; const grad = cctx.createLinearGradient(x,0,x,h); grad.addColorStop(0,'rgba(29,185,84,1)'); grad.addColorStop(1,'rgba(125,243,168,0.25)'); cctx.fillStyle = grad; cctx.fillRect(x, canvas.clientHeight-h, barWidth*0.8, h); }
+}
+
+// overlay visualizer
+const overlayCanvas = document.getElementById('overlayViz'); const octx = overlayCanvas.getContext('2d'); function resizeOverlay(){ overlayCanvas.width = overlayCanvas.clientWidth*devicePixelRatio; overlayCanvas.height = overlayCanvas.clientHeight*devicePixelRatio; octx.scale(devicePixelRatio, devicePixelRatio);} window.addEventListener('resize', resizeOverlay); resizeOverlay();
+function drawOverlay(){ requestAnimationFrame(drawOverlay); analyser.getByteFrequencyData(dataArr); octx.clearRect(0,0,overlayCanvas.clientWidth, overlayCanvas.clientHeight);
+  const bars = 80; const bw = overlayCanvas.clientWidth/bars; for(let i=0;i<bars;i++){ const val = dataArr[Math.floor(i*(bufferLength/bars))]; const h = (val/255)*overlayCanvas.clientHeight; const x = i*bw; const g = octx.createLinearGradient(x,0,x,h); g.addColorStop(0,'rgba(29,185,84,1)'); g.addColorStop(1,'rgba(255,255,255,0.05)'); octx.fillStyle = g; octx.fillRect(x, overlayCanvas.clientHeight-h, bw*0.8, h); }
+}
+
+// bass-reactive glow (quick) using low-frequency average
+function bassLoop(){ requestAnimationFrame(bassLoop); analyser.getByteFrequencyData(dataArr); let sum=0; let count=0; for(let i=0;i<bufferLength*0.12;i++){ sum += dataArr[i]; count++; } const avg = sum/count; document.getElementById('blur-bg').style.filter = `blur(${30 + (avg/255)*20}px) saturate(${0.6 + (avg/255)*0.8}) brightness(${0.35 + (avg/255)*0.8})`; }
+
+// expose overlay play button
+const overlayPlay = document.getElementById('overlayPlay'); overlayPlay.onclick = ()=> audio.paused? play(): pause();
+
+// start animation loops when user interacts (audio context needs user gesture)
+function startVisualsOnce(){ if(ctx.state==='suspended') ctx.resume(); draw(); drawOverlay(); bassLoop(); document.removeEventListener('click', startVisualsOnce); }
+document.addEventListener('click', startVisualsOnce);
+
+// init
+renderPlaylist(); loadTrack(index);
+
+</script>
+</body>
+</html>
